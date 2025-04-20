@@ -1,0 +1,123 @@
+#include <Adafruit_Fingerprint.h>
+#include <HardwareSerial.h>
+
+// Configuración del puerto serial para el sensor
+HardwareSerial mySerial(2);  // Usamos UART2 del ESP32
+
+Adafruit_Fingerprint finger = Adafruit_Fingerprint(&mySerial);
+
+// Pin del LED (opcional para feedback visual)
+const int ledPin = 2;
+
+void setup() {
+  pinMode(ledPin, OUTPUT);
+  digitalWrite(ledPin, LOW);
+  
+  Serial.begin(115200);
+  while (!Serial);  // Espera a que el puerto serial esté listo
+  
+  // Inicializa el puerto serial para el sensor (RX: GPIO16, TX: GPIO17)
+  mySerial.begin(57600, SERIAL_8N1, 16, 17);
+  
+  Serial.println("\n\nSistema de Eliminación de Huellas - ESP32");
+
+  // Verifica la comunicación con el sensor
+  if (finger.verifyPassword()) {
+    Serial.println("Sensor de huella detectado correctamente");
+    digitalWrite(ledPin, HIGH); // Breve indicación de encendido
+    delay(500);
+    digitalWrite(ledPin, LOW);
+  } else {
+    Serial.println("ERROR: No se pudo comunicar con el sensor");
+    while (1) {
+      digitalWrite(ledPin, HIGH);
+      delay(100);
+      digitalWrite(ledPin, LOW);
+      delay(100);
+    }
+  }
+
+  // Mostrar huellas registradas
+  finger.getTemplateCount();
+  Serial.print("\nHuellas registradas: "); Serial.print(finger.templateCount); 
+  Serial.print(" de "); Serial.println(finger.capacity);
+}
+
+uint8_t readnumber(void) {
+  uint8_t num = 0;
+  
+  while (num == 0) {
+    Serial.println("\nIngrese el ID a eliminar (1-127) o 0 para cancelar:");
+    while (!Serial.available());
+    num = Serial.parseInt();
+    // Limpiar buffer serial
+    while (Serial.available()) Serial.read();
+    
+    if (num > 127) {
+      Serial.println("ID inválido! Debe ser entre 1 y 127");
+      num = 0;
+    }
+  }
+  return num;
+}
+
+void loop() {
+  uint8_t id = readnumber();
+  
+  if (id == 0) {
+    Serial.println("Operación cancelada");
+    return;
+  }
+
+  Serial.print("\nIntentando eliminar huella ID #");
+  Serial.println(id);
+
+  uint8_t result = deleteFingerprint(id);
+  
+  if (result == FINGERPRINT_OK) {
+    digitalWrite(ledPin, HIGH);
+    Serial.println("¡Huella eliminada correctamente!");
+    delay(1000);
+    digitalWrite(ledPin, LOW);
+    
+    // Actualizar contador
+    finger.getTemplateCount();
+    Serial.print("Huellas restantes: "); Serial.print(finger.templateCount); 
+    Serial.print(" de "); Serial.println(finger.capacity);
+  }
+}
+
+uint8_t deleteFingerprint(uint8_t id) {
+  uint8_t p = finger.deleteModel(id);
+
+  switch (p) {
+    case FINGERPRINT_OK:
+      return p; // El mensaje de éxito se maneja en loop()
+      
+    case FINGERPRINT_PACKETRECIEVEERR:
+      Serial.println("Error de comunicación con el sensor");
+      break;
+      
+    case FINGERPRINT_BADLOCATION:
+      Serial.println("No existe huella en esa ubicación");
+      break;
+      
+    case FINGERPRINT_FLASHERR:
+      Serial.println("Error al escribir en la memoria flash");
+      break;
+      
+    default:
+      Serial.print("Error desconocido: 0x"); 
+      Serial.println(p, HEX);
+  }
+  
+  // Parpadeo rápido para indicar error
+  for (int i = 0; i < 3; i++) {
+    digitalWrite(ledPin, HIGH);
+    delay(100);
+    digitalWrite(ledPin, LOW);
+    delay(100);
+  }
+  
+  return p;
+}

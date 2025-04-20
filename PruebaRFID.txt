@@ -1,0 +1,60 @@
+#include <SPI.h>       // Incluir librería SPI
+#include <MFRC522.h>   // Incluir librería MFRC522
+
+// Definir los pines RST y SS (SDA) según la conexión
+#define RST_PIN  22  // Pin GPIO22 para RST
+#define SS_PIN   5   // Pin GPIO5 para SDA (SS / CS)
+
+// Crear una instancia del objeto MFRC522
+MFRC522 mfrc522(SS_PIN, RST_PIN);
+
+void setup() {
+  Serial.begin(115200); // Iniciar comunicación serial a 115200 baudios
+  while (!Serial);      // Esperar a que el puerto serie se conecte (útil para algunas placas)
+
+  SPI.begin();          // Iniciar el bus SPI (usa pines por defecto: SCK=18, MISO=19, MOSI=23)
+  mfrc522.PCD_Init();   // Iniciar el módulo MFRC522
+
+  Serial.println("Inicializando lector RC522...");
+  mfrc522.PCD_DumpVersionToSerial(); // Muestra detalles del firmware del chip en el Monitor Serie (opcional)
+  Serial.println("¡Lector RC522 listo!");
+  Serial.println("Acerca una tarjeta o llavero RFID...");
+  Serial.println();
+}
+
+void loop() {
+  // Buscar nuevas tarjetas presentes
+  if ( ! mfrc522.PICC_IsNewCardPresent()) {
+    // Si no hay tarjeta nueva, esperar un poco y volver a intentar
+    delay(50);
+    return;
+  }
+
+  // Seleccionar una de las tarjetas (si hay varias)
+  if ( ! mfrc522.PICC_ReadCardSerial()) {
+    // Si no se pudo leer la tarjeta, esperar un poco y volver a intentar
+    delay(50);
+    return;
+  }
+
+  // Si llegamos aquí, se detectó y leyó una tarjeta
+  Serial.print("¡Tarjeta detectada! UID: ");
+  printHex(mfrc522.uid.uidByte, mfrc522.uid.size); // Imprimir el UID en formato hexadecimal
+  Serial.println();
+
+  // Detener la comunicación con la tarjeta actual para poder leer otra
+  mfrc522.PICC_HaltA();
+
+  // Detener la encriptación (necesario para MFRC522)
+  mfrc522.PCD_StopCrypto1();
+
+  delay(1000); // Esperar un segundo antes de buscar la siguiente tarjeta
+}
+
+// Función auxiliar para imprimir arrays de bytes en formato hexadecimal
+void printHex(byte *buffer, byte bufferSize) {
+  for (byte i = 0; i < bufferSize; i++) {
+    Serial.print(buffer[i] < 0x10 ? " 0" : " "); // Añadir un 0 si es necesario para formato
+    Serial.print(buffer[i], HEX);
+  }
+}

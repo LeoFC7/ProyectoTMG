@@ -1,0 +1,190 @@
+/***************************************************
+  Adaptación para ESP32 NodeMCU del ejemplo de registro
+  para sensor óptico de huellas digitales Adafruit
+  
+  Conexiones recomendadas:
+  Sensor   ESP32
+  VCC    -> 3.3V
+  GND    -> GND
+  TX     -> GPIO16 (RX2)
+  RX     -> GPIO17 (TX2)
+  
+  Basado en el código original de Adafruit Industries
+  Adaptado por [Tu Nombre] para ESP32
+ ****************************************************/
+
+#include <Adafruit_Fingerprint.h>
+#include <HardwareSerial.h>
+
+// Usamos el segundo puerto serial del ESP32
+HardwareSerial mySerial(2);
+
+Adafruit_Fingerprint finger = Adafruit_Fingerprint(&mySerial);
+
+uint8_t id;
+
+void setup() {
+  Serial.begin(115200);
+  while (!Serial);  // Espera a que el puerto serial esté listo
+  delay(100);
+  
+  // Inicializa el puerto serial para el sensor
+  mySerial.begin(57600, SERIAL_8N1, 16, 17); // RX, TX
+  
+  Serial.println("\n\nRegistro de Huella Digital - ESP32 NodeMCU");
+
+  // Verifica la comunicación con el sensor
+  if (finger.verifyPassword()) {
+    Serial.println("Sensor de huella detectado correctamente");
+  } else {
+    Serial.println("No se pudo comunicar con el sensor :(");
+    Serial.println("Verifica las conexiones y reinicia");
+    while (1) { delay(1); }
+  }
+
+  // Muestra información del sensor
+  Serial.println("Leyendo parámetros del sensor");
+  finger.getParameters();
+  Serial.print("Capacidad: "); Serial.println(finger.capacity);
+  Serial.print("Nivel de seguridad: "); Serial.println(finger.security_level);
+}
+
+uint8_t readnumber(void) {
+  uint8_t num = 0;
+  
+  while (num == 0) {
+    while (!Serial.available());
+    num = Serial.parseInt();
+    // Limpia el buffer serial por si hay datos adicionales
+    while (Serial.available()) Serial.read();
+  }
+  return num;
+}
+
+void loop() {
+  Serial.println("\nListo para registrar una nueva huella");
+  Serial.println("Ingresa el ID (1 a 127) para guardar esta huella...");
+  
+  id = readnumber();
+  if (id == 0 || id > 127) { // Validación de rango
+    Serial.println("ID inválido! Debe ser entre 1 y 127");
+    return;
+  }
+  
+  Serial.print("Registrando huella con ID #");
+  Serial.println(id);
+
+  while (!getFingerprintEnroll()) {
+    // Si falla el registro, permite reintentar
+    Serial.println("Error en el registro, intentando nuevamente...");
+    delay(2000);
+  }
+}
+
+uint8_t getFingerprintEnroll() {
+  int p = -1;
+  
+  // PRIMERA CAPTURA
+  Serial.println("Coloca el dedo en el sensor...");
+  while (p != FINGERPRINT_OK) {
+    p = finger.getImage();
+    switch (p) {
+      case FINGERPRINT_OK:
+        Serial.println("Imagen capturada");
+        break;
+      case FINGERPRINT_NOFINGER:
+        Serial.print(".");
+        delay(50);
+        break;
+      case FINGERPRINT_PACKETRECIEVEERR:
+        Serial.println("Error de comunicación");
+        return p;
+      case FINGERPRINT_IMAGEFAIL:
+        Serial.println("Error al capturar imagen");
+        return p;
+      default:
+        Serial.println("Error desconocido");
+        return p;
+    }
+  }
+
+  // Convertir primera imagen
+  p = finger.image2Tz(1);
+  switch (p) {
+    case FINGERPRINT_OK:
+      Serial.println("Imagen convertida");
+      break;
+    case FINGERPRINT_IMAGEMESS:
+      Serial.println("Imagen muy desordenada");
+      return p;
+    default:
+      Serial.println("Error al convertir imagen");
+      return p;
+  }
+
+  // Esperar a que retire el dedo
+  Serial.println("Retira el dedo del sensor");
+  delay(2000);
+  p = 0;
+  while (p != FINGERPRINT_NOFINGER) {
+    p = finger.getImage();
+    delay(100);
+  }
+
+  // SEGUNDA CAPTURA
+  Serial.println("Coloca el mismo dedo nuevamente...");
+  p = -1;
+  while (p != FINGERPRINT_OK) {
+    p = finger.getImage();
+    switch (p) {
+      case FINGERPRINT_OK:
+        Serial.println("Imagen capturada");
+        break;
+      case FINGERPRINT_NOFINGER:
+        Serial.print(".");
+        delay(50);
+        break;
+      default:
+        Serial.println("Error en segunda captura");
+        return p;
+    }
+  }
+
+  // Convertir segunda imagen
+  p = finger.image2Tz(2);
+  if (p != FINGERPRINT_OK) {
+    Serial.println("Error al convertir segunda imagen");
+    return p;
+  }
+
+  // Crear modelo
+  Serial.print("Creando modelo para ID #"); Serial.println(id);
+  p = finger.createModel();
+  if (p == FINGERPRINT_OK) {
+    Serial.println("Huellas coinciden!");
+  } else if (p == FINGERPRINT_ENROLLMISMATCH) {
+    Serial.println("Las huellas no coinciden");
+    return p;
+  } else {
+    Serial.println("Error al crear modelo");
+    return p;
+  }
+
+  // Almacenar modelo
+  Serial.print("Almacenando modelo en ID #"); Serial.println(id);
+  p = finger.storeModel(id);
+  if (p == FINGERPRINT_OK) {
+    Serial.println("Huella almacenada correctamente!");
+    // Opcional: mostrar espacio restante
+    finger.getTemplateCount();
+    Serial.print("Espacio usado: "); Serial.print(finger.templateCount); 
+    Serial.print("/"); Serial.println(finger.capacity);
+    return p;
+  } else if (p == FINGERPRINT_BADLOCATION) {
+    Serial.println("No se pudo almacenar en esa ubicación");
+    return p;
+  } else {
+    Serial.println("Error al almacenar huella");
+    return p;
+  }
+}

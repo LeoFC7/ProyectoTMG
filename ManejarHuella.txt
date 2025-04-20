@@ -1,0 +1,77 @@
+#include <Adafruit_Fingerprint.h>
+#include <HardwareSerial.h>
+
+// Configuración del puerto serial para el sensor
+HardwareSerial mySerial(2);  // UART2 (RX: GPIO16, TX: GPIO17)
+
+Adafruit_Fingerprint finger = Adafruit_Fingerprint(&mySerial);
+
+const int relayPin = 2;  // Pin del relé
+
+void setup() {
+  pinMode(relayPin, OUTPUT);
+  digitalWrite(relayPin, LOW);  // Asegurar que el relé inicia apagado
+
+  Serial.begin(115200);
+  while (!Serial);  // Esperar a que el monitor serial esté listo
+
+  // Inicializar comunicación con el sensor
+  mySerial.begin(57600, SERIAL_8N1, 16, 17);
+  
+  Serial.println("\n\nSistema de Control por Huella - ESP32 + Relé");
+
+  // Verificar sensor
+  if (finger.verifyPassword()) {
+    Serial.println("Sensor de huella detectado");
+  } else {
+    Serial.println("Error: Sensor no conectado");
+    while (1);
+  }
+
+  finger.getTemplateCount();
+  Serial.print("Huellas registradas: "); 
+  Serial.println(finger.templateCount);
+}
+
+void loop() {
+  int fingerID = getFingerprintIDez();
+  
+  if (fingerID == 1 || fingerID == 2) {  // IDs válidos
+    digitalWrite(relayPin, HIGH);  // Activa el relé
+    Serial.println("\nACCESO CONCEDIDO - Relé activado");
+    delay(3000);  // Tiempo de activación (3 segundos)
+    digitalWrite(relayPin, LOW);  // Desactiva el relé
+    Serial.println("Relé desactivado");
+  }
+  else if (fingerID == -1) {
+    Serial.println("Coloca tu dedo...");
+  }
+  else if (fingerID == -2) {
+    Serial.println("Error en el sensor");
+  }
+  else {
+    Serial.println("ACCESO DENEGADO");
+  }
+  
+  delay(50);  // Evita sobrecarga del procesador
+}
+
+// Función de reconocimiento (sin cambios)
+int getFingerprintIDez() {
+  uint8_t p = finger.getImage();
+  if (p == FINGERPRINT_NOFINGER) return -1;
+  if (p != FINGERPRINT_OK) return -2;
+
+  p = finger.image2Tz();
+  if (p != FINGERPRINT_OK) return -2;
+
+  p = finger.fingerFastSearch();
+  if (p != FINGERPRINT_OK) return (p == FINGERPRINT_NOTFOUND) ? 0 : -2;
+
+  Serial.print("Huella ID: "); 
+  Serial.print(finger.fingerID);
+  Serial.print(" - Confianza: "); 
+  Serial.println(finger.confidence);
+  
+  return finger.fingerID;
+}
