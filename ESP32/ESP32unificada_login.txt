@@ -1,0 +1,105 @@
+#include <Adafruit_Fingerprint.h>
+#include <HardwareSerial.h>
+
+// Configuración sensor de huella
+HardwareSerial mySerial(2);  // UART2 (RX: GPIO16, TX: GPIO17)
+Adafruit_Fingerprint sensorHuella = Adafruit_Fingerprint(&mySerial);
+
+// Pines de control
+const int pinLed = 2;    // Pin para el LED indicador
+
+void setup() {
+  pinMode(pinLed, OUTPUT);
+  digitalWrite(pinLed, LOW);
+
+  Serial.begin(115200);
+  while (!Serial);
+
+  // Inicializar comunicación con sensor de huella
+  Serial.println("Inicializando comunicación con sensor de huella...");
+  mySerial.begin(57600, SERIAL_8N1, 16, 17);
+  delay(1000); // Esperar a que se establezca la comunicación
+  
+  // Verificar conexión con el sensor
+  Serial.println("Verificando conexión con el sensor...");
+  if (sensorHuella.verifyPassword()) {
+    Serial.println("Sensor de huella inicializado correctamente");
+  } else {
+    Serial.println("Error al comunicar con sensor de huella");
+    Serial.println("Posibles causas:");
+    Serial.println("1. Conexiones incorrectas");
+    Serial.println("2. Voltaje insuficiente");
+    Serial.println("3. Sensor dañado");
+    Serial.println("4. Pines incorrectos");
+    Serial.println("\nVerifica las conexiones:");
+    Serial.println("VCC -> 3.3V");
+    Serial.println("GND -> GND");
+    Serial.println("TX -> GPIO16");
+    Serial.println("RX -> GPIO17");
+    
+    while(1) {
+      digitalWrite(pinLed, HIGH);
+      delay(100);
+      digitalWrite(pinLed, LOW);
+      delay(100);
+    }
+  }
+
+  Serial.println("Sistema listo para verificar huellas");
+}
+
+void loop() {
+  int idHuella = obtenerIDHuella();
+  
+  if (idHuella > 0) {  // Huella válida
+    // Enviar ID de huella por Serial
+    Serial.print("HUELLA:");
+    Serial.println(idHuella);
+    
+    // Esperar respuesta del servidor
+    if (Serial.available()) {
+      String respuesta = Serial.readStringUntil('\n');
+      if (respuesta.indexOf("OK") != -1) {
+        // Login exitoso
+        for(int i = 0; i < 3; i++) {
+          digitalWrite(pinLed, HIGH);
+          delay(200);
+          digitalWrite(pinLed, LOW);
+          delay(200);
+        }
+      } else {
+        // Login fallido
+        digitalWrite(pinLed, HIGH);
+        delay(1000);
+        digitalWrite(pinLed, LOW);
+      }
+    }
+  }
+  else if (idHuella == 0) {
+    Serial.println("Huella no reconocida");
+  }
+  else if (idHuella == -2) {
+    Serial.println("Error en el sensor de huella");
+  }
+  
+  delay(50);
+}
+
+int obtenerIDHuella() {
+  uint8_t p = sensorHuella.getImage();
+  if (p == FINGERPRINT_NOFINGER) return -1;
+  if (p != FINGERPRINT_OK) return -2;
+
+  p = sensorHuella.image2Tz();
+  if (p != FINGERPRINT_OK) return -2;
+
+  p = sensorHuella.fingerFastSearch();
+  if (p != FINGERPRINT_OK) return (p == FINGERPRINT_NOTFOUND) ? 0 : -2;
+
+  Serial.print("Huella ID: "); 
+  Serial.print(sensorHuella.fingerID);
+  Serial.print(" Confianza: "); 
+  Serial.println(sensorHuella.confidence);
+  
+  return sensorHuella.fingerID;
+} 

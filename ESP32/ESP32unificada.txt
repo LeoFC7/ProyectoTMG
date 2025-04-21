@@ -1,0 +1,408 @@
+#include <Adafruit_Fingerprint.h>
+#include <HardwareSerial.h>
+#include <SPI.h>
+#include <MFRC522.h>
+
+// Configuración RFID
+#define PIN_RST  22  // Pin GPIO22 para Reset
+#define PIN_SS   5   // Pin GPIO5 para SDA (SS/CS)
+MFRC522 lectorRFID(PIN_SS, PIN_RST);
+
+// Configuración sensor de huella
+HardwareSerial mySerial(2);  // UART2 (RX: GPIO16, TX: GPIO17)
+Adafruit_Fingerprint sensorHuella = Adafruit_Fingerprint(&mySerial);
+
+// Pines de control
+const int pinRele = 2;  // Pin para controlar el relé
+const int pinLed = 2;    // Pin para el LED indicador
+
+// Variables de estado
+bool sistemaActivo = false;
+uint8_t huellaActiva = 0;
+
+void setup() {
+  pinMode(pinRele, OUTPUT);
+  digitalWrite(pinRele, LOW);
+  pinMode(pinLed, OUTPUT);
+  digitalWrite(pinLed, LOW);
+
+  Serial.begin(115200);
+  while (!Serial);
+
+  // Inicializar comunicación con sensor de huella
+  mySerial.begin(57600, SERIAL_8N1, 16, 17);
+  
+  // Inicializar lector RFID
+  SPI.begin();
+  lectorRFID.PCD_Init();
+  delay(4); // Pequeña pausa necesaria para el RFID
+  lectorRFID.PCD_DumpVersionToSerial();
+  
+  Serial.println("\n\nSistema de Control por Huella Digital y RFID");
+  Serial.println("===========================================");
+
+  // Verificar sensores
+  if (sensorHuella.verifyPassword()) {
+    Serial.println("Sensor de huella inicializado correctamente");
+  } else {
+    Serial.println("Error al comunicar con sensor de huella");
+    while(1) {
+      digitalWrite(pinLed, HIGH);
+      delay(100);
+      digitalWrite(pinLed, LOW);
+      delay(100);
+    }
+  }
+
+  Serial.println("Lector RFID listo");
+  
+  // Mostrar información inicial
+  sensorHuella.getTemplateCount();
+  Serial.print("\nHuellas registradas: "); 
+  Serial.print(sensorHuella.templateCount);
+  Serial.print(" de ");
+  Serial.println(sensorHuella.capacity);
+  
+  mostrarMenu();
+}
+
+void loop() {
+  if (Serial.available()) {
+    char opcion = Serial.read();
+    while (Serial.available()) Serial.read();
+    
+    switch(opcion) {
+      case '1':
+        modoVerificacion();
+        break;
+      case '2':
+        modoRegistro();
+        break;
+      case '3':
+        modoEliminacion();
+        break;
+      default:
+        Serial.println("Opción no válida");
+        break;
+    }
+    mostrarMenu();
+  }
+  delay(100);
+}
+
+void mostrarMenu() {
+  Serial.println("\n\nSeleccione una opción:");
+  Serial.println("1 - Modo de Verificación");
+  Serial.println("2 - Modo de Registro");
+  Serial.println("3 - Modo de Eliminación");
+  Serial.println("========================");
+}
+
+void modoVerificacion() {
+  Serial.println("\nModo de Verificación Activado");
+  Serial.println("Coloque su dedo registrado para activar/desactivar");
+  Serial.println("Presione cualquier tecla para salir");
+  
+  while (!Serial.available()) {
+    int idHuella = obtenerIDHuella();
+    
+    if (idHuella > 0) {  // Huella válida
+      controlarSistema(idHuella);
+    }
+    else if (idHuella == 0) {
+      Serial.println("Huella no reconocida");
+    }
+    else if (idHuella == -2) {
+      Serial.println("Error en el sensor de huella");
+    }
+    
+    // Verificar RFID si el sistema está activo
+    if (sistemaActivo) {
+      leerRFID();
+    }
+    
+    delay(50);
+  }
+  
+  while (Serial.available()) Serial.read();
+}
+
+void controlarSistema(int idHuella) {
+  if (!sistemaActivo) {
+    // Activar sistema
+    sistemaActivo = true;
+    huellaActiva = idHuella;
+    digitalWrite(pinRele, HIGH);
+    digitalWrite(pinLed, HIGH);
+    Serial.println("\nSistema ACTIVADO - Relé encendido");
+    Serial.println("Lector RFID habilitado");
+    Serial.print("Huella autorizada ID: ");
+    Serial.println(idHuella);
+  } 
+  else if (sistemaActivo && idHuella == huellaActiva) {
+    // Desactivar sistema
+    sistemaActivo = false;
+    digitalWrite(pinRele, LOW);
+    digitalWrite(pinLed, LOW);
+    Serial.println("\nSistema DESACTIVADO - Relé apagado");
+    Serial.println("Lector RFID deshabilitado");
+  }
+}
+
+void leerRFID() {
+  // Buscar tarjetas nuevas
+  if (!lectorRFID.PICC_IsNewCardPresent()) {
+    return;
+  }
+
+  // Seleccionar tarjeta
+  if (!lectorRFID.PICC_ReadCardSerial()) {
+    return;
+  }
+
+  // Mostrar UID
+  Serial.print("Tarjeta RFID detectada - UID:");
+  for (byte i = 0; i < lectorRFID.uid.size; i++) {
+    Serial.print(lectorRFID.uid.uidByte[i] < 0x10 ? " 0" : " ");
+    Serial.print(lectorRFID.uid.uidByte[i], HEX);
+  } 
+  Serial.println();
+
+  lectorRFID.PICC_HaltA();
+  lectorRFID.PCD_StopCrypto1();
+  
+  delay(300); // Evitar múltiples lecturas
+}
+
+int obtenerIDHuella() {
+  uint8_t p = sensorHuella.getImage();
+  if (p == FINGERPRINT_NOFINGER) return -1;
+  if (p != FINGERPRINT_OK) return -2;
+
+  p = sensorHuella.image2Tz();
+  if (p != FINGERPRINT_OK) return -2;
+
+  p = sensorHuella.fingerFastSearch();
+  if (p != FINGERPRINT_OK) return (p == FINGERPRINT_NOTFOUND) ? 0 : -2;
+
+  Serial.print("Huella ID: "); 
+  Serial.print(sensorHuella.fingerID);
+  Serial.print(" Confianza: "); 
+  Serial.println(sensorHuella.confidence);
+  
+  return sensorHuella.fingerID;
+}
+
+void modoRegistro() {
+  Serial.println("\nModo de Registro Activado");
+  
+  while (true) {
+    Serial.println("\nIngrese ID (1-127) para guardar o 0 para cancelar");
+    
+    uint8_t id = leerNumero(true);
+    
+    if (id == 0) {
+      Serial.println("Registro cancelado");
+      return;
+    }
+    
+    Serial.print("Registrando huella ID #");
+    Serial.println(id);
+
+    while (!registrarHuella(id)) {
+      Serial.println("Error, intentando nuevamente...");
+      delay(2000);
+    }
+  }
+}
+
+uint8_t registrarHuella(uint8_t id) {
+  int p = -1;
+  
+  // PRIMERA CAPTURA
+  Serial.println("Coloque el dedo en el sensor...");
+  while (p != FINGERPRINT_OK) {
+    p = sensorHuella.getImage();
+    switch (p) {
+      case FINGERPRINT_OK:
+        Serial.println("Imagen capturada");
+        break;
+      case FINGERPRINT_NOFINGER:
+        Serial.print(".");
+        delay(50);
+        break;
+      case FINGERPRINT_PACKETRECIEVEERR:
+        Serial.println("Error de comunicación");
+        return p;
+      case FINGERPRINT_IMAGEFAIL:
+        Serial.println("Error al capturar imagen");
+        return p;
+      default:
+        Serial.println("Error desconocido");
+        return p;
+    }
+  }
+
+  // Convertir primera imagen
+  p = sensorHuella.image2Tz(1);
+  switch (p) {
+    case FINGERPRINT_OK:
+      Serial.println("Imagen convertida");
+      break;
+    case FINGERPRINT_IMAGEMESS:
+      Serial.println("Imagen muy desordenada");
+      return p;
+    default:
+      Serial.println("Error al convertir imagen");
+      return p;
+  }
+
+  // Esperar a retirar el dedo
+  Serial.println("Retire el dedo del sensor");
+  delay(2000);
+  p = 0;
+  while (p != FINGERPRINT_NOFINGER) {
+    p = sensorHuella.getImage();
+    delay(100);
+  }
+
+  // SEGUNDA CAPTURA
+  Serial.println("Coloque el mismo dedo nuevamente...");
+  p = -1;
+  while (p != FINGERPRINT_OK) {
+    p = sensorHuella.getImage();
+    switch (p) {
+      case FINGERPRINT_OK:
+        Serial.println("Imagen capturada");
+        break;
+      case FINGERPRINT_NOFINGER:
+        Serial.print(".");
+        delay(50);
+        break;
+      default:
+        Serial.println("Error en segunda captura");
+        return p;
+    }
+  }
+
+  // Convertir segunda imagen
+  p = sensorHuella.image2Tz(2);
+  if (p != FINGERPRINT_OK) {
+    Serial.println("Error al convertir segunda imagen");
+    return p;
+  }
+
+  // Crear modelo
+  Serial.print("Creando modelo para ID #"); Serial.println(id);
+  p = sensorHuella.createModel();
+  if (p == FINGERPRINT_OK) {
+    Serial.println("Huellas coinciden!");
+  } else if (p == FINGERPRINT_ENROLLMISMATCH) {
+    Serial.println("Las huellas no coinciden");
+    return p;
+  } else {
+    Serial.println("Error al crear modelo");
+    return p;
+  }
+
+  // Almacenar modelo
+  Serial.print("Guardando modelo en ID #"); Serial.println(id);
+  p = sensorHuella.storeModel(id);
+  if (p == FINGERPRINT_OK) {
+    Serial.println("Huella guardada correctamente!");
+    sensorHuella.getTemplateCount();
+    Serial.print("Huellas registradas: "); Serial.print(sensorHuella.templateCount); 
+    Serial.print("/"); Serial.println(sensorHuella.capacity);
+    return p;
+  } else if (p == FINGERPRINT_BADLOCATION) {
+    Serial.println("No se pudo guardar en esa ubicación");
+    return p;
+  } else {
+    Serial.println("Error al guardar huella");
+    return p;
+  }
+}
+
+void modoEliminacion() {
+  Serial.println("\nModo de Eliminación Activado");
+  
+  while (true) {
+    sensorHuella.getTemplateCount();
+    Serial.print("\nHuellas registradas: "); 
+    Serial.print(sensorHuella.templateCount);
+    Serial.print(" de ");
+    Serial.println(sensorHuella.capacity);
+    
+    Serial.println("\nIngrese ID a eliminar (1-127) o 0 para cancelar:");
+    
+    uint8_t id = leerNumero(true);
+    if (id == 0) {
+      Serial.println("Eliminación cancelada");
+      return;
+    }
+    
+    if (id > 127) {
+      Serial.println("ID inválido! Debe ser entre 1 y 127");
+      continue;
+    }
+
+    Serial.print("\nEliminando huella ID #");
+    Serial.println(id);
+
+    uint8_t resultado = sensorHuella.deleteModel(id);
+    
+    if (resultado == FINGERPRINT_OK) {
+      digitalWrite(pinLed, HIGH);
+      Serial.println("Huella eliminada correctamente!");
+      delay(1000);
+      digitalWrite(pinLed, LOW);
+    } else {
+      manejarError(resultado);
+    }
+  }
+}
+
+uint8_t leerNumero(bool permitirCero) {
+  uint8_t num = 0;
+  bool valido = false;
+  
+  while (!valido) {
+    while (!Serial.available());
+    num = Serial.parseInt();
+    while (Serial.available()) Serial.read();
+    
+    if (permitirCero || num != 0) {
+      if (num <= 127) {
+        valido = true;
+      } else {
+        Serial.println("ID inválido! Debe ser entre 1 y 127");
+      }
+    }
+  }
+  return num;
+}
+
+void manejarError(uint8_t error) {
+  switch (error) {
+    case FINGERPRINT_PACKETRECIEVEERR:
+      Serial.println("Error de comunicación con el sensor");
+      break;
+    case FINGERPRINT_BADLOCATION:
+      Serial.println("No existe huella en esa ubicación");
+      break;
+    case FINGERPRINT_FLASHERR:
+      Serial.println("Error al escribir en la memoria flash");
+      break;
+    default:
+      Serial.print("Error desconocido: 0x"); 
+      Serial.println(error, HEX);
+  }
+  
+  // Indicación visual de error
+  for (int i = 0; i < 3; i++) {
+    digitalWrite(pinLed, HIGH);
+    delay(100);
+    digitalWrite(pinLed, LOW);
+    delay(100);
+  }
+}
