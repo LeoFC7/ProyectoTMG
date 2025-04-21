@@ -6,6 +6,18 @@ if(!isset($_SESSION["loggedin"]) || $_SESSION["loggedin"] !== true){
     header("Location: /ProyectoTMG/index.php");
     exit;
 }
+
+require_once "config/database.php";
+
+// Obtener información completa del usuario
+$sql = "SELECT * FROM usuarios WHERE id = ?";
+if($stmt = mysqli_prepare($conn, $sql)) {
+    mysqli_stmt_bind_param($stmt, "i", $_SESSION["id"]);
+    mysqli_stmt_execute($stmt);
+    $result = mysqli_stmt_get_result($stmt);
+    $user = mysqli_fetch_assoc($result);
+    mysqli_stmt_close($stmt);
+}
 ?>
 
 <!DOCTYPE html>
@@ -14,7 +26,7 @@ if(!isset($_SESSION["loggedin"]) || $_SESSION["loggedin"] !== true){
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard - Sistema TMG</title>
-    <link rel="stylesheet" href="assets/css/style.css">
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
     <style>
         .dashboard-container {
             width: 80%;
@@ -30,6 +42,7 @@ if(!isset($_SESSION["loggedin"]) || $_SESSION["loggedin"] !== true){
             padding: 15px;
             border-radius: 5px;
             margin-bottom: 20px;
+            display: none; /* Ocultar por defecto */
         }
         .btn-logout {
             background-color: #dc3545;
@@ -44,20 +57,44 @@ if(!isset($_SESSION["loggedin"]) || $_SESSION["loggedin"] !== true){
         .btn-logout:hover {
             background-color: #c82333;
         }
+        .action-buttons {
+            margin-top: 20px;
+            text-align: center;
+        }
     </style>
 </head>
 <body>
     <div class="dashboard-container">
         <div class="welcome-message">
-            <h2>Bienvenido, <?php echo htmlspecialchars($_SESSION["username"]); ?></h2>
-        </div>
-        
-        <div class="user-info">
-            <p><strong>Tipo de Usuario:</strong> <?php echo htmlspecialchars($_SESSION["tipo_usuario"]); ?></p>
-            <p><strong>ID de Usuario:</strong> <?php echo htmlspecialchars($_SESSION["id"]); ?></p>
+            <h2>Bienvenido, <?php echo htmlspecialchars($user['nombre'] . ' ' . $user['apellido_paterno'] . ' ' . $user['apellido_materno']); ?></h2>
         </div>
 
-        <a href="logout.php" class="btn-logout">Cerrar Sesión</a>
+        <div class="action-buttons">
+            <button onclick="toggleUserInfo()" class="btn btn-primary">Ver mis datos</button>
+            <?php if($user['tipo_usuario'] === 'admin'): ?>
+                <a href="admin_panel.php" class="btn btn-success">Panel de Administración</a>
+            <?php endif; ?>
+            <a href="logout.php" class="btn-logout">Cerrar Sesión</a>
+        </div>
+
+        <div id="userInfo" class="user-info">
+            <h4>Información de tu cuenta</h4>
+            <p><strong>Usuario:</strong> <?php echo htmlspecialchars($user['username']); ?></p>
+            <p><strong>Email:</strong> <?php echo htmlspecialchars($user['email'] ?? 'No especificado'); ?></p>
+            <p><strong>Dirección:</strong> <?php echo htmlspecialchars($user['direccion'] ?? 'No especificada'); ?></p>
+            <p><strong>Tipo de Usuario:</strong> <?php echo htmlspecialchars($user['tipo_usuario']); ?></p>
+        </div>
     </div>
+
+    <script>
+        function toggleUserInfo() {
+            const userInfo = document.getElementById('userInfo');
+            if (userInfo.style.display === 'none' || userInfo.style.display === '') {
+                userInfo.style.display = 'block';
+            } else {
+                userInfo.style.display = 'none';
+            }
+        }
+    </script>
 </body>
 </html> 

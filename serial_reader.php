@@ -8,24 +8,42 @@ require_once 'config/database.php';
 $port = 'COM5'; // Ajusta según tu puerto COM
 $baud = 115200;
 
+echo "Intentando conectar con el puerto $port...\n";
+
 // Abrir puerto serial
-$fp = fopen($port, 'r+');
+$fp = @fopen($port, 'r+');
 if (!$fp) {
-    die("Error: No se pudo abrir el puerto serial");
+    echo "Error: No se pudo abrir el puerto serial $port\n";
+    echo "Posibles causas:\n";
+    echo "1. El puerto no existe\n";
+    echo "2. El puerto está siendo usado por otro programa\n";
+    echo "3. No tienes permisos para acceder al puerto\n";
+    echo "\nSugerencias:\n";
+    echo "1. Verifica que el ESP32 esté conectado\n";
+    echo "2. Revisa el Administrador de dispositivos para ver el puerto correcto\n";
+    echo "3. Cierra otros programas que puedan estar usando el puerto\n";
+    die();
 }
 
 // Configurar el puerto
+echo "Configurando puerto serial...\n";
 exec("mode $port BAUD=$baud PARITY=N data=8 stop=1 xon=off");
 
 echo "Esperando datos del ESP32...\n";
+echo "Si no recibes datos, verifica:\n";
+echo "1. Que el ESP32 esté encendido\n";
+echo "2. Que esté correctamente conectado\n";
+echo "3. Que el código del ESP32 esté corriendo\n";
 
 while (true) {
     if ($line = fgets($fp)) {
         $line = trim($line);
+        echo "Datos recibidos: $line\n";
         
         // Verificar si es un mensaje de huella
         if (strpos($line, 'HUELLA:') === 0) {
             $id_huella = intval(substr($line, 7));
+            echo "ID de huella detectado: $id_huella\n";
             
             // Buscar usuario con ese ID de huella
             $sql = "SELECT id, username, tipo_usuario FROM usuarios WHERE id_huella = ?";
